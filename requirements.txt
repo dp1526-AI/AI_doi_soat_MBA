@@ -1,3 +1,4 @@
+google-genai
 streamlit
-google-generativeai
-python-docx
+pandas
+openpyxl
