@@ -87,7 +87,7 @@ with st.sidebar:
     if not api_key_input:
         st.info("💡 Bạn cần cung cấp API Key để ứng dụng có thể kết nối với mô hình Gemini.")
         
-    model_name = st.selectbox("Mô hình AI:", ["gemini-2.5-flash", "gemini-2.5-pro"], index=0)
+    model_name = st.selectbox("Mô hình AI:", ["gemini-2.5-flash", "gemini-2.5-pro","gemini-3.6-flash"], index=0)
     
     st.divider()
     st.subheader("📚 Lịch sử bộ nhớ")
