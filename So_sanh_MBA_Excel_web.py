@@ -254,7 +254,7 @@ if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type=
 
             # Prompt Chuyên gia Thử nghiệm MBA Phân phối bậc cao
             system_instruction = """
-            Bạn là Kỹ sư Trưởng Thí nghiệm & Kiểm định Máy Biến Áp Phân Phối (Cấp điện áp đến 35kV theo tiêu chuẩn EVN và TCVN 6306 / IEC 60076).
+            Bạn là Kỹ sư Trưởng Thí nghiệm & Thẩm định Máy Biến Áp Phân Phối (cấp điện áp đến 35kV theo tiêu chuẩn EVN và TCVN 6306 / IEC 60076).
             Nhiệm vụ của bạn: Đối soát toàn diện, chi tiết từng tham số đo đạc giữa Hồ sơ kỹ thuật / Tiêu chuẩn cơ sở chuẩn (File 1) với Biên bản kiểm định / Thử nghiệm hiện trường thực tế (File 2).
 
             QUY TẮC ĐÁNH GIÁ CHUYÊN MÔN:
@@ -262,28 +262,32 @@ if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type=
                - Kiểm tra tỷ số biến ở TẤT CẢ các nấc phân áp (Nấc 1, 2, 3, 4, 5...). Dung sai cho phép theo IEC 60076 không vượt quá ±0.5% so với tỷ số danh định.
                - Đối soát đúng tổ đấu dây quy định (Dyn11, Yyn0...).
             2. ĐIỆN TRỞ MỘT CHIỀU (DC RESISTANCE):
-               - Kiểm tra cuộn Cao áp (A-B, B-C, C-A hoặc A-0, B-0, C-0) và Hạ áp (a-b, b-c, c-a hoặc a-0, b-0, c-0).
-               - Độ lệch điện trở một chiều giữa các pha: Không được vượt quá 2% đối với cuộn dây đấu tam giác hoặc giữa các pha có dây trung tính.
-               - Đánh giá sự đồng đều giữa các nấc điều chỉnh phân áp.
+               - Kiểm tra cuộn Cao áp và Hạ áp.
+               - Độ lệch điện trở một chiều giữa các pha: Không vượt quá 2%. Đánh giá độ đồng đều giữa các nấc.
             3. THỬ NGHIỆM KHÔNG TẢI (NO-LOAD TEST):
-               - Tổn hao không tải (Po) ở tần số và điện áp danh định (Un): So sánh với ngưỡng TCCS 01 / TCCS 10 hoặc cam kết của nhà sản xuất (dung sai Po tối đa +15%, nhưng tổng Po+Pk không vượt quá +10%).
-               - Dòng điện không tải (Io%): So sánh với giá trị giới hạn tiêu chuẩn (dung sai +30% giá trị cam kết).
+               - Tổn hao không tải (Po) ở tần số và điện áp danh định (Un): So sánh với ngưỡng TCCS 01 / TCCS 10 (dung sai Po tối đa +15%).
+               - Dòng điện không tải (Io%): Dung sai tối đa +30% giá trị cam kết.
             4. THỬ NGHIỆM NGẮN MẠCH (LOAD LOSS / SHORT-CIRCUIT TEST):
                - Tổn hao ngắn mạch (Pk) đã quy đổi về nhiệt độ chuẩn 75°C: So sánh với TCCS (dung sai +15%).
-               - Điện áp ngắn mạch (Uk%): Dung sai cho phép thông thường là ±10% giá trị danh định.
-            5. ĐIỆN TRỞ CÁCH ĐIỆN & HỆ SỐ HẤP THỤ (INSULATION RESISTANCE):
-               - Cuộn Cao - Hạ + Vỏ (C-H+V), Cuộn Hạ - Cao + Vỏ (H-C+V), Cuộn Cao - Hạ (C-H).
-               - Điện trở cách điện R60s ở nhiệt độ đo (quy đổi về 20°C hoặc so sánh ngưỡng tối thiểu theo quy trình vận hành).
-               - Hệ số hấp thụ cách điện: KHA = R60s / R15s (Yêu cầu KHA ≥ 1.3 đối với MBA ngâm dầu).
-            6. THỬ NGHIỆM ĐẶC TÍNH DẦU CÁCH ĐIỆN (TRANSFORMER OIL):
-               - Điện áp đánh thủng dầu (kV/2.5mm): Máy mới/sau đại tu ≥ 40kV (hoặc ≥ 35kV tùy cấp điện áp theo quy trình).
-               - Tạp chất cơ học, độ nhớt, hàm lượng nước/ẩm hòa tan (nếu có).
-            7. ĐỘ BỀN CÁCH ĐIỆN (DIELECTRIC TESTS):
+               - Điện áp ngắn mạch (Uk%): Dung sai thông thường ±10% giá trị danh định.
+            5. TỔNG TỔN HAO CÔNG SUẤT (TOTAL LOSSES - BẮT BUỘC ĐỐI SOÁT):
+               - Xác định Tổng tổn hao thực tế: P_tong = Po + Pk (Pk tính ở 75°C).
+               - Xác định Tổng tổn hao chuẩn/danh định theo TCCS: P_tong_chuan = Po_chuan + Pk_chuan.
+               - Đánh giá dung sai kép theo IEC 60076 / Quy định EVN:
+                 + Từng tổn hao riêng lẻ (Po hoặc Pk) được phép lệch tối đa +15%.
+                 + TUY NHIÊN TỔNG TỔN HAO (Po + Pk) TUYỆT ĐỐI KHÔNG ĐƯỢC VƯỢT QUÁ +10% so với Tổng tổn hao chuẩn.
+                 + Nếu tổng tổn hao vượt +10%, lập tức đánh giá "KHÔNG ĐẠT" và đưa vào Discrepancy_Alert.
+            6. ĐIỆN TRỞ CÁCH ĐIỆN & HỆ SỐ HẤP THỤ (INSULATION RESISTANCE):
+               - R60s và Hệ số hấp thụ KHA = R60s / R15s (Yêu cầu KHA ≥ 1.3 đối với MBA ngâm dầu).
+            7. THỬ NGHIỆM ĐẶC TÍNH DẦU CÁCH ĐIỆN:
+               - Điện áp đánh thủng dầu (kV/2.5mm) ≥ 40kV (hoặc ≥ 35kV tùy cấp điện áp).
+            8. ĐỘ BỀN CÁCH ĐIỆN:
                - Điện áp tăng cao tần số công nghiệp (AC withstand voltage) cuộn CA và HA trong 1 phút.
             """
 
             prompt_main = f"""
             Dựa trên File 1 (Chuẩn / TCCS) và File 2 (Biên bản kiểm định đối chiếu), hãy thực hiện đối soát chi tiết và phát hiện mọi điểm bất thường, sai khác hoặc vượt ngưỡng dung sai cho phép.
+            ĐẶC BIỆT chú ý tính toán và so sánh chi tiết TỔNG TỔN HAO (Po + Pk ở 75°C) xem có vượt ngưỡng dung sai +10% hay không.
             {history_context}
 
             YÊU CẦU TRẢ VỀ ĐỊNH DẠNG JSON NGUYÊN KHỐI DUY NHẤT theo đúng schema:
@@ -298,20 +302,20 @@ if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type=
               ],
               "Comparison": [
                 {{
-                  "Hang_muc": "Tên hạng mục thí nghiệm (Ví dụ: Tỷ số biến, Điện trở DC Cao áp, Điện trở DC Hạ áp, Tổn hao Po, Dòng không tải Io, Tổn hao ngắn mạch Pk 75°C, Điện áp ngắn mạch Uk%, Điện trở cách điện R60, Hệ số KHA, Độ cách điện của dầu...)",
-                  "Parameter": "Tham số cụ thể (Nấc phân áp, Pha A-B / B-C / C-A, Cuộn CA / HA...)",
-                  "Unit": "Đơn vị (V, kV, A, W, kW, %, Ohm, mOhm, MOhm...)",
+                  "Hang_muc": "Tên hạng mục thí nghiệm (Gồm: Tỷ số biến, Điện trở DC Cao áp, Điện trở DC Hạ áp, Tổn hao Po, Dòng không tải Io, Tổn hao ngắn mạch Pk 75°C, TỔNG TỔN HAO (Po + Pk), Điện áp ngắn mạch Uk%, Điện trở cách điện R60, Hệ số KHA, Độ cách điện của dầu...)",
+                  "Parameter": "Tham số cụ thể (Ví dụ: 'Tổng Po + Pk ở 75°C', Nấc phân áp, Pha A-B...)",
+                  "Unit": "Đơn vị (W, kW, V, A, %, Ohm...)",
                   "Gia_tri_goc": "Số liệu chuẩn từ TCCS hoặc File 1",
                   "Gia_tri_doi_chieu": "Số liệu đo đạc thực tế trong File 2",
                   "Do_lech_phan_tram": "Độ lệch tính bằng % hoặc Ghi chú chênh lệch",
-                  "Nguong_cho_phep": "Ngưỡng quy định theo TCCS / TCVN / IEC",
+                  "Nguong_cho_phep": "Ngưỡng quy định theo TCCS / TCVN / IEC (Ví dụ: Tổng tổn hao không quá +10%)",
                   "Result": "ĐẠT / KHÔNG ĐẠT / KHÁC BIỆT / CẢNH BÁO"
                 }}
               ],
               "Discrepancy_Alert": [
                 {{
-                  "Warning": "Tên thông số/hạng mục sai lệch hoặc bất thường",
-                  "Detail": "Đánh giá chi tiết nguy cơ kỹ thuật, khả năng suy giảm cách điện, nguy cơ sự cố khi đóng điện và khuyến nghị hướng xử lý thí nghiệm lại hoặc từ chối nghiệm thu"
+                  "Warning": "Tên thông số/hạng mục sai lệch hoặc bất thường (đặc biệt nếu Tổng tổn hao vượt +10%)",
+                  "Detail": "Đánh giá chi tiết rủi ro tổn thất kỹ thuật, quá nhiệt gây suy giảm tuổi thọ máy và khuyến nghị vận hành"
                 }}
               ]
             }}
