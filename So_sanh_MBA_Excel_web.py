@@ -11,7 +11,7 @@ from google.genai import types
 
 # --- CẤU HÌNH TRANG WEB ---
 st.set_page_config(
-    page_title="AI Đối Soát Máy Biến Áp",
+    page_title="AI Đối Soát & Thẩm Định MBA Phân Phối",
     page_icon="⚡",
     layout="wide"
 )
@@ -44,11 +44,11 @@ def upload_file_bytes_to_gemini(client, uploaded_file):
         tmp_path = tmp.name
 
     try:
-        file = client.files.upload(file=tmp_path)
-        while file.state.name == "PROCESSING":
+        file_ref = client.files.upload(file=tmp_path)
+        while file_ref.state.name == "PROCESSING":
             time.sleep(1.5)
-            file = client.files.get(name=file.name)
-        return file
+            file_ref = client.files.get(name=file_ref.name)
+        return file_ref
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
@@ -62,217 +62,331 @@ def extract_json(text):
     except Exception:
         return None
 
-# --- GIAO DIỆN CHÍNH ---
-st.title("⚡ AI Đối Soát & So Sánh Thông Số Máy Biến Áp (MBA)")
-st.caption("Hệ thống thẩm định và đối soát hồ sơ thí nghiệm / tiêu chuẩn TCCS theo chuẩn EVN.")
+# --- KHỞI TẠO BIẾN TRẠNG THÁI (SESSION STATE) ---
+if "file_a_status" not in st.session_state:
+    st.session_state.file_a_status = {"valid": False, "msg": "", "info": None, "last_name": ""}
+if "file_b_status" not in st.session_state:
+    st.session_state.file_b_status = {"valid": False, "msg": "", "info": None, "last_name": ""}
 
-# Lấy key từ biến môi trường hệ thống hoặc secrets (nếu có cấu hình trước)
+# --- GIAO DIỆN CHÍNH ---
+st.title("⚡ AI Đối Soát & Thẩm Định Chuyên Sâu Máy Biến Áp (MBA)")
+st.caption("Hệ thống thẩm định hồ sơ kỹ thuật & đối soát biên bản thí nghiệm MBA theo TCVN 6306 / IEC 60076 & Tiêu chuẩn EVN (TCCS 01, TCCS 10).")
+
+# Cấu hình API Key và Model
 env_api_key = os.environ.get("GEMINI_API_KEY", "")
 if not env_api_key and "GEMINI_API_KEY" in st.secrets:
     env_api_key = st.secrets["GEMINI_API_KEY"]
 
-# Sidebar cấu hình
 with st.sidebar:
     st.header("⚙️ Cấu hình Hệ thống")
-    
-    # Cho phép người dùng tự nhập Key, mặc định là chuỗi rỗng để không bị lộ
     api_key_input = st.text_input(
-        "Nhập Gemini API Key của bạn:", 
+        "Gemini API Key:", 
         value=env_api_key, 
         type="password",
-        placeholder="Dán mã API Key vào đây (AIza... hoặc AQ...)",
-        help="Khóa API được xử lý an toàn trong phiên làm việc hiện tại và không lưu cố định vào mã nguồn."
+        placeholder="Dán API Key vào đây (AIza... hoặc AQ...)",
+        help="Khóa API được xử lý an toàn trong phiên làm việc hiện tại."
     )
     
-    if not api_key_input:
-        st.info("💡 Bạn cần cung cấp API Key để ứng dụng có thể kết nối với mô hình Gemini.")
-        
-    model_name = st.selectbox("Mô hình AI:", ["gemini-2.5-flash", "gemini-2.5-pro","gemini-3.6-flash"], index=0)
+    model_name = st.selectbox(
+        "Mô hình AI:", 
+        ["gemini-2.5-flash", "gemini-2.5-pro"], 
+        index=0
+    )
     
     st.divider()
-    st.subheader("📚 Lịch sử bộ nhớ")
+    st.subheader("📚 Bộ nhớ đối soát lịch sử")
     hist = load_knowledge_base()
-    st.write(f"Số phiên đã ghi nhận: **{len(hist)}**")
+    st.write(f"Số phiên ghi nhớ: **{len(hist)}**")
     if st.button("Xóa bộ nhớ học tập"):
         if os.path.exists(KNOWLEDGE_FILE):
             os.remove(KNOWLEDGE_FILE)
             st.success("Đã làm sạch bộ nhớ!")
             st.rerun()
 
-# 2 Cột tải tài liệu
+# --- HÀM THẨM ĐỊNH FILE TỨC THÌ KHI TẢI LÊN ---
+def verify_file_a(uploaded_file, client):
+    with st.spinner("🔍 Đang thẩm định tính pháp lý & kỹ thuật của File Gốc..."):
+        try:
+            pdf_ref = upload_file_bytes_to_gemini(client, uploaded_file)
+            prompt = """
+            Bạn là Kỹ sư Trưởng thẩm định hồ sơ kỹ thuật lưới điện và thiết bị phân phối EVN.
+            Hãy kiểm tra tài liệu PDF này có thuộc một trong các loại tài liệu chuẩn sau không:
+            1. Tiêu chuẩn kỹ thuật máy biến áp phân phối: TCCS 01, TCCS 10 (EVN SPC, EVN CPC, EVN NPC, EVNHCMC, EVNHANOI) hoặc quy cách kỹ thuật máy biến áp tương đương.
+            2. Biên bản thử nghiệm/thí nghiệm xuất xưởng chuẩn (Routine Test Report) của nhà sản xuất máy biến áp (MBA/máy biến thế).
+
+            YÊU CẦU TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON:
+            {
+                "is_valid": true/false,
+                "doc_type": "TCCS_01" hoặc "TCCS_10" hoặc "BBTN_CHUAN" hoặc "OTHER",
+                "reason": "Giải thích chi tiết căn cứ xác định (Tên tiêu chuẩn, Số quyết định ban hành, Mã hiệu MBA, Tên đơn vị lập...)"
+            }
+            """
+            res = client.chats.create(
+                model=model_name,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            ).send_message(message=[pdf_ref, prompt])
+            data = extract_json(res.text)
+            return data
+        except Exception as e:
+            return {"is_valid": False, "reason": f"Lỗi thẩm định: {str(e)}"}
+
+def verify_file_b(uploaded_file, client):
+    with st.spinner("🔍 Đang kiểm tra tính hợp lệ của Biên bản kiểm định..."):
+        try:
+            pdf_ref = upload_file_bytes_to_gemini(client, uploaded_file)
+            prompt = """
+            Bạn là Chuyên viên Thử nghiệm Cao cấp của Trung tâm Thí nghiệm điện (ETC).
+            Hãy kiểm tra tài liệu PDF này có phải là Biên bản kiểm định / Biên bản thử nghiệm / Thí nghiệm kỹ thuật của MÁY BIẾN ÁP (máy biến thế) hay không?
+            (Không chấp nhận biên bản của máy cắt, TU, TI, chống sét van hoặc thiết bị khác).
+
+            YÊU CẦU TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON:
+            {
+                "is_bbtn_mba": true/false,
+                "reason": "Giải thích chi tiết (Tên trạm/nhà máy, số chế tạo MBA, đơn vị thí nghiệm, các hạng mục đo lường được nhận dạng...)"
+            }
+            """
+            res = client.chats.create(
+                model=model_name,
+                config=types.GenerateContentConfig(response_mime_type="application/json")
+            ).send_message(message=[pdf_ref, prompt])
+            data = extract_json(res.text)
+            return data
+        except Exception as e:
+            return {"is_bbtn_mba": False, "reason": f"Lỗi thẩm định: {str(e)}"}
+
+# --- BỐ TRÍ 2 KHUNG CHỌN TỆP ---
 col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. File Gốc (A)")
-    file_a = st.file_uploader("TCCS 01 / TCCS 10 / Biên bản chuẩn", type=["pdf"], key="file_a")
+    file_a = st.file_uploader("Chọn Tiêu chuẩn kỹ thuật (TCCS 01 / TCCS 10) hoặc Biên bản chuẩn", type=["pdf"], key="uploader_a")
+    
+    if file_a:
+        if file_a.name != st.session_state.file_a_status["last_name"]:
+            if not api_key_input.strip():
+                st.error("⚠️ Vui lòng nhập Gemini API Key ở cột trái trước khi tải tài liệu!")
+            else:
+                client_temp = genai.Client(api_key=api_key_input.strip())
+                res_check = verify_file_a(file_a, client_temp)
+                if res_check and res_check.get("is_valid"):
+                    st.session_state.file_a_status = {
+                        "valid": True, 
+                        "msg": f"✅ HỢP LỆ: {res_check.get('doc_type')} - {res_check.get('reason')}", 
+                        "info": res_check, 
+                        "last_name": file_a.name
+                    }
+                else:
+                    reason = res_check.get("reason") if res_check else "Không nhận diện được định dạng TCCS/MBA"
+                    st.session_state.file_a_status = {
+                        "valid": False, 
+                        "msg": f"❌ KHÔNG HỢP LỆ: Tệp vừa chọn không phải là TCCS 01, TCCS 10 hoặc Biên bản chuẩn MBA!\n\nLý do: {reason}\n👉 Vui lòng chọn lại đúng tệp tiêu chuẩn hoặc biên bản thử nghiệm MBA.", 
+                        "info": None, 
+                        "last_name": file_a.name
+                    }
+        
+        # Hiển thị kết quả thẩm định File A
+        if st.session_state.file_a_status["valid"]:
+            st.success(st.session_state.file_a_status["msg"])
+        else:
+            st.error(st.session_state.file_a_status["msg"])
+    else:
+        st.session_state.file_a_status = {"valid": False, "msg": "", "info": None, "last_name": ""}
 
 with col2:
     st.subheader("2. File Đối Chiếu (B)")
-    file_b = st.file_uploader("Biên bản kiểm định / thử nghiệm", type=["pdf"], key="file_b")
-
-# Nút Thẩm định và Xử lý
-if st.button("📊 BẮT ĐẦU ĐỐI SOÁT & XUẤT BÁO CÁO", type="primary", use_container_width=True):
-    # Kiểm tra API Key chặt chẽ trước khi xử lý
-    if not api_key_input or not api_key_input.strip():
-        st.error("❌ Vui lòng nhập Gemini API Key ở bảng điều khiển bên trái trước khi bắt đầu!")
-    elif not file_a or not file_b:
-        st.error("❌ Vui lòng tải lên đầy đủ cả File Gốc (A) và File Đối Chiếu (B)!")
-    else:
-        try:
-            # Khởi tạo client bằng key do người dùng nhập vào
-            client = genai.Client(api_key=api_key_input.strip())
-            
-            with st.status("Đang tiến hành xử lý...", expanded=True) as status:
-                # Bước 1: Nạp File
-                st.write("⏳ Đang nạp tệp lên AI Cloud...")
-                pdf_1 = upload_file_bytes_to_gemini(client, file_a)
-                pdf_2 = upload_file_bytes_to_gemini(client, file_b)
-                
-                # Bước 2: Thẩm định sơ bộ File A
-                st.write("🔍 Đang thẩm định tính hợp lệ của File Gốc...")
-                prompt_a = """
-                Hãy phân tích tài liệu PDF này và cho biết:
-                Tài liệu này có phải là Tiêu chuẩn cơ sở MBA (TCCS 01, TCCS 10...) hoặc Biên bản kiểm định/thí nghiệm MBA không?
-                YÊU CẦU TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON:
-                {"is_valid": true/false, "doc_type": "TCCS_01/TCCS_10/BBTN_MBA/OTHER", "reason": "giải thích ngắn"}
-                """
-                res_a = client.chats.create(
-                    model=model_name,
-                    config=types.GenerateContentConfig(response_mime_type="application/json")
-                ).send_message(message=[pdf_1, prompt_a])
-                data_a = extract_json(res_a.text)
-                
-                if not (data_a and data_a.get("is_valid")):
-                    status.update(label="File A không hợp lệ!", state="error")
-                    st.error(f"❌ Lỗi File Gốc: {data_a.get('reason') if data_a else 'Sai định dạng'}")
-                    st.stop()
-                st.success(f"✅ File Gốc hợp lệ: {data_a.get('doc_type')} ({data_a.get('reason')})")
-
-                # Bước 3: Thẩm định sơ bộ File B
-                st.write("🔍 Đang thẩm định tính hợp lệ của File Đối Chiếu...")
-                prompt_b = """
-                Hãy kiểm tra xem đây có phải là Biên bản kiểm định/thử nghiệm máy biến áp hay không?
-                YÊU CẦU TRẢ VỀ DUY NHẤT ĐỊNH DẠNG JSON:
-                {"is_bbtn_mba": true/false, "reason": "giải thích ngắn"}
-                """
-                res_b = client.chats.create(
-                    model=model_name,
-                    config=types.GenerateContentConfig(response_mime_type="application/json")
-                ).send_message(message=[pdf_2, prompt_b])
-                data_b = extract_json(res_b.text)
-                
-                if not (data_b and data_b.get("is_bbtn_mba")):
-                    status.update(label="File B không hợp lệ!", state="error")
-                    st.error(f"❌ Lỗi File Đối Chiếu: {data_b.get('reason') if data_b else 'Sai định dạng'}")
-                    st.stop()
-                st.success(f"✅ File Đối Chiếu hợp lệ: {data_b.get('reason')}")
-
-                # Bước 4: Chạy đối soát chi tiết
-                st.write("🧠 AI Chuyên gia đang thực hiện đối soát chi tiết & đánh giá dung sai...")
-                
-                hist_items = load_knowledge_base()
-                history_context = ""
-                if hist_items:
-                    history_context = f"\n[LỊCH SỬ ĐỐI SOÁT TRƯỚC ĐÓ]:\n{json.dumps(hist_items[-3:], ensure_ascii=False)}"
-
-                system_instruction = """
-                Bạn là Chuyên gia Cao cấp về Thí nghiệm & Kiểm định Máy Biến Áp Phân Phối (EVN/TCCS).
-                Nhiệm vụ của bạn: Đối soát toàn diện các hạng mục đo lường giữa File 1 (Chuẩn/TCCS) với File 2 (Biên bản kiểm định).
-                Tiêu chuẩn kiểm tra:
-                1. Tỷ số biến đổi điện áp (K) và Tổ đấu dây.
-                2. Điện trở một chiều (DC) các cuộn dây Cao áp và Hạ áp, độ lệch pha (%).
-                3. Thử nghiệm không tải: Tổn hao (Po), Dòng điện không tải (Io%).
-                4. Thử nghiệm ngắn mạch: Tổn hao (Pk ở 75°C), Điện áp ngắn mạch (Uk%).
-                5. Điện trở cách điện cuộn dây (R60s, R15s, KHA = R60/R15).
-                6. Thử nghiệm đặc tính cách điện của dầu: Điện áp đánh thủng (kV), tạp chất.
-                """
-
-                prompt_main = f"""
-                Dựa trên File 1 và File 2, hãy thực hiện đối soát chi tiết và phát hiện mọi điểm bất thường, sai khác hoặc vượt ngưỡng dung sai cho phép.
-                {history_context}
-
-                YÊU CẦU TRẢ VỀ ĐỊNH DẠNG JSON NGUYÊN KHỐI DUY NHẤT theo đúng schema:
-                {{
-                  "Summary": [
-                    {{"Thong_tin": "...", "File_chuan_A": "...", "File_doi_chieu_B": "...", "Ket_luan_so_bo": "..."}}
-                  ],
-                  "Comparison": [
-                    {{"Hang_muc": "...", "Parameter": "...", "Unit": "...", "Gia_tri_goc": "...", "Gia_tri_doi_chieu": "...", "Do_lech_phan_tram": "...", "Nguong_cho_phep": "...", "Result": "ĐẠT / KHÔNG ĐẠT / KHÁC BIỆT"}}
-                  ],
-                  "Discrepancy_Alert": [
-                    {{"Warning": "...", "Detail": "..."}}
-                  ]
-                }}
-                """
-
-                chat = client.chats.create(
-                    model=model_name,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        response_mime_type="application/json"
-                    )
-                )
-                res_main = chat.send_message(message=[pdf_1, pdf_2, prompt_main])
-                data_result = extract_json(res_main.text)
-                
-                status.update(label="Đối soát hoàn tất!", state="complete")
-
-            # Bước 5: Hiển thị kết quả ra Web
-            if data_result:
-                save_to_knowledge_base({
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                    "file_a": file_a.name,
-                    "file_b": file_b.name,
-                    "alerts_summary": data_result.get("Discrepancy_Alert", [])[:3]
-                })
-
-                st.subheader("📋 Cảnh báo & Sai lệch chính (Discrepancy Alert)")
-                alerts = data_result.get("Discrepancy_Alert", [])
-                if alerts:
-                    for alert in alerts:
-                        st.warning(f"**{alert.get('Warning')}**: {alert.get('Detail')}")
-                else:
-                    st.success("Không phát hiện sai lệch bất thường vượt ngưỡng cho phép.")
-
-                # Tab hiển thị chi tiết
-                tab1, tab2 = st.tabs(["📊 Bảng So Sánh Chi Tiết", "📄 Thông Tin Chung"])
-                
-                with tab1:
-                    df_comp = pd.DataFrame(data_result.get("Comparison", []))
-                    if not df_comp.empty:
-                        st.dataframe(df_comp, use_container_width=True)
-                    else:
-                        st.info("Không có dữ liệu đối chiếu tham số.")
-
-                with tab2:
-                    df_sum = pd.DataFrame(data_result.get("Summary", []))
-                    if not df_sum.empty:
-                        st.dataframe(df_sum, use_container_width=True)
-                    else:
-                        st.info("Không có dữ liệu tóm tắt.")
-
-                # Bước 6: Tạo nút tải Excel trực tiếp
-                excel_buffer = io.BytesIO()
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    for sheet_name, content in data_result.items():
-                        display_name = sheet_name.replace("_", " ")[:31]
-                        df_sheet = pd.DataFrame(content)
-                        df_sheet.to_excel(writer, sheet_name=display_name, index=False)
-                        worksheet = writer.sheets[display_name]
-                        for col in worksheet.columns:
-                            worksheet.column_dimensions[col[0].column_letter].width = 28
-
-                st.download_button(
-                    label="📥 TẢI VỀ BÁO CÁO EXCEL",
-                    data=excel_buffer.getvalue(),
-                    file_name=f"Bao_Cao_Doi_Soat_MBA_{int(time.time())}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    type="primary"
-                )
-
+    file_b = st.file_uploader("Chọn Biên bản kiểm định / thử nghiệm máy biến áp", type=["pdf"], key="uploader_b")
+    
+    if file_b:
+        if file_b.name != st.session_state.file_b_status["last_name"]:
+            if not api_key_input.strip():
+                st.error("⚠️ Vui lòng nhập Gemini API Key ở cột trái trước khi tải tài liệu!")
             else:
-                st.error("Không thể phân tích dữ liệu JSON trả về từ mô hình.")
-                st.text_area("Dữ liệu phản hồi gốc:", res_main.text, height=200)
+                client_temp = genai.Client(api_key=api_key_input.strip())
+                res_check = verify_file_b(file_b, client_temp)
+                if res_check and res_check.get("is_bbtn_mba"):
+                    st.session_state.file_b_status = {
+                        "valid": True, 
+                        "msg": f"✅ HỢP LỆ: Biên bản thử nghiệm MBA - {res_check.get('reason')}", 
+                        "info": res_check, 
+                        "last_name": file_b.name
+                    }
+                else:
+                    reason = res_check.get("reason") if res_check else "Không nhận diện được biên bản kiểm định MBA"
+                    st.session_state.file_b_status = {
+                        "valid": False, 
+                        "msg": f"❌ KHÔNG HỢP LỆ: Tệp vừa chọn KHÔNG PHẢI là Biên bản kiểm định/thí nghiệm máy biến áp!\n\nLý do: {reason}\n👉 Vui lòng chọn lại đúng tệp biên bản kiểm định MBA.", 
+                        "info": None, 
+                        "last_name": file_b.name
+                    }
+        
+        # Hiển thị kết quả thẩm định File B
+        if st.session_state.file_b_status["valid"]:
+            st.success(st.session_state.file_b_status["msg"])
+        else:
+            st.error(st.session_state.file_b_status["msg"])
+    else:
+        st.session_state.file_b_status = {"valid": False, "msg": "", "info": None, "last_name": ""}
 
-        except Exception as e:
-            st.error(f"Đã xảy ra lỗi kết nối hoặc xử lý: {str(e)}")
+st.write("---")
+
+# Kiểm tra điều kiện mở khóa nút chạy
+can_proceed = st.session_state.file_a_status["valid"] and st.session_state.file_b_status["valid"]
+
+if not can_proceed:
+    st.info("💡 **Trạng thái:** Nút phân tích sẽ tự động kích hoạt sau khi cả 2 tệp đầu vào được AI thẩm định hợp lệ.")
+
+# --- NÚT BẮT ĐẦU ĐỐI SOÁT ---
+if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type="primary", disabled=not can_proceed, use_container_width=True):
+    try:
+        client = genai.Client(api_key=api_key_input.strip())
+        
+        with st.status("🚀 Đang tiến hành đối soát và phân tích chuyên gia...", expanded=True) as status:
+            st.write("⏳ Đang đồng bộ tài liệu lên AI Analysis Engine...")
+            pdf_1 = upload_file_bytes_to_gemini(client, file_a)
+            pdf_2 = upload_file_bytes_to_gemini(client, file_b)
+            
+            st.write("🧠 AI Chuyên gia Thí nghiệm điện đang thẩm định toàn diện các hạng mục kỹ thuật...")
+            
+            hist_items = load_knowledge_base()
+            history_context = ""
+            if hist_items:
+                history_context = f"\n[LỊCH SỬ ĐỐI SOÁT TRƯỚC ĐÓ ĐỂ ĐẢM BẢO TÍNH NHẤT QUÁN VỀ TIÊU CHÍ ĐÁNH GIÁ VÀ DUNG SAI]:\n{json.dumps(hist_items[-3:], ensure_ascii=False)}"
+
+            # Prompt Chuyên gia Thử nghiệm MBA Phân phối bậc cao
+            system_instruction = """
+            Bạn là Kỹ sư Trưởng Thí nghiệm & Kiểm định Máy Biến Áp Phân Phối (Cấp điện áp đến 35kV theo tiêu chuẩn EVN và TCVN 6306 / IEC 60076).
+            Nhiệm vụ của bạn: Đối soát toàn diện, chi tiết từng tham số đo đạc giữa Hồ sơ kỹ thuật / Tiêu chuẩn cơ sở chuẩn (File 1) với Biên bản kiểm định / Thử nghiệm hiện trường thực tế (File 2).
+
+            QUY TẮC ĐÁNH GIÁ CHUYÊN MÔN:
+            1. TỶ SỐ BIẾN ĐỔI (K) & TỔ ĐẤU DÂY:
+               - Kiểm tra tỷ số biến ở TẤT CẢ các nấc phân áp (Nấc 1, 2, 3, 4, 5...). Dung sai cho phép theo IEC 60076 không vượt quá ±0.5% so với tỷ số danh định.
+               - Đối soát đúng tổ đấu dây quy định (Dyn11, Yyn0...).
+            2. ĐIỆN TRỞ MỘT CHIỀU (DC RESISTANCE):
+               - Kiểm tra cuộn Cao áp (A-B, B-C, C-A hoặc A-0, B-0, C-0) và Hạ áp (a-b, b-c, c-a hoặc a-0, b-0, c-0).
+               - Độ lệch điện trở một chiều giữa các pha: Không được vượt quá 2% đối với cuộn dây đấu tam giác hoặc giữa các pha có dây trung tính.
+               - Đánh giá sự đồng đều giữa các nấc điều chỉnh phân áp.
+            3. THỬ NGHIỆM KHÔNG TẢI (NO-LOAD TEST):
+               - Tổn hao không tải (Po) ở tần số và điện áp danh định (Un): So sánh với ngưỡng TCCS 01 / TCCS 10 hoặc cam kết của nhà sản xuất (dung sai Po tối đa +15%, nhưng tổng Po+Pk không vượt quá +10%).
+               - Dòng điện không tải (Io%): So sánh với giá trị giới hạn tiêu chuẩn (dung sai +30% giá trị cam kết).
+            4. THỬ NGHIỆM NGẮN MẠCH (LOAD LOSS / SHORT-CIRCUIT TEST):
+               - Tổn hao ngắn mạch (Pk) đã quy đổi về nhiệt độ chuẩn 75°C: So sánh với TCCS (dung sai +15%).
+               - Điện áp ngắn mạch (Uk%): Dung sai cho phép thông thường là ±10% giá trị danh định.
+            5. ĐIỆN TRỞ CÁCH ĐIỆN & HỆ SỐ HẤP THỤ (INSULATION RESISTANCE):
+               - Cuộn Cao - Hạ + Vỏ (C-H+V), Cuộn Hạ - Cao + Vỏ (H-C+V), Cuộn Cao - Hạ (C-H).
+               - Điện trở cách điện R60s ở nhiệt độ đo (quy đổi về 20°C hoặc so sánh ngưỡng tối thiểu theo quy trình vận hành).
+               - Hệ số hấp thụ cách điện: KHA = R60s / R15s (Yêu cầu KHA ≥ 1.3 đối với MBA ngâm dầu).
+            6. THỬ NGHIỆM ĐẶC TÍNH DẦU CÁCH ĐIỆN (TRANSFORMER OIL):
+               - Điện áp đánh thủng dầu (kV/2.5mm): Máy mới/sau đại tu ≥ 40kV (hoặc ≥ 35kV tùy cấp điện áp theo quy trình).
+               - Tạp chất cơ học, độ nhớt, hàm lượng nước/ẩm hòa tan (nếu có).
+            7. ĐỘ BỀN CÁCH ĐIỆN (DIELECTRIC TESTS):
+               - Điện áp tăng cao tần số công nghiệp (AC withstand voltage) cuộn CA và HA trong 1 phút.
+            """
+
+            prompt_main = f"""
+            Dựa trên File 1 (Chuẩn / TCCS) và File 2 (Biên bản kiểm định đối chiếu), hãy thực hiện đối soát chi tiết và phát hiện mọi điểm bất thường, sai khác hoặc vượt ngưỡng dung sai cho phép.
+            {history_context}
+
+            YÊU CẦU TRẢ VỀ ĐỊNH DẠNG JSON NGUYÊN KHỐI DUY NHẤT theo đúng schema:
+            {{
+              "Summary": [
+                {{
+                  "Thong_tin": "Trạm / Vị trí / Mã trạm / Mã MBA / Số chế tạo / Công suất danh định (kVA) / Cấp điện áp (kV) / Tổ đấu dây",
+                  "File_chuan_A": "Thông số danh định tại File 1",
+                  "File_doi_chieu_B": "Thông số đo đạc thực tế tại File 2",
+                  "Ket_luan_so_bo": "Khớp / Sai lệch / Cần lưu ý"
+                }}
+              ],
+              "Comparison": [
+                {{
+                  "Hang_muc": "Tên hạng mục thí nghiệm (Ví dụ: Tỷ số biến, Điện trở DC Cao áp, Điện trở DC Hạ áp, Tổn hao Po, Dòng không tải Io, Tổn hao ngắn mạch Pk 75°C, Điện áp ngắn mạch Uk%, Điện trở cách điện R60, Hệ số KHA, Độ cách điện của dầu...)",
+                  "Parameter": "Tham số cụ thể (Nấc phân áp, Pha A-B / B-C / C-A, Cuộn CA / HA...)",
+                  "Unit": "Đơn vị (V, kV, A, W, kW, %, Ohm, mOhm, MOhm...)",
+                  "Gia_tri_goc": "Số liệu chuẩn từ TCCS hoặc File 1",
+                  "Gia_tri_doi_chieu": "Số liệu đo đạc thực tế trong File 2",
+                  "Do_lech_phan_tram": "Độ lệch tính bằng % hoặc Ghi chú chênh lệch",
+                  "Nguong_cho_phep": "Ngưỡng quy định theo TCCS / TCVN / IEC",
+                  "Result": "ĐẠT / KHÔNG ĐẠT / KHÁC BIỆT / CẢNH BÁO"
+                }}
+              ],
+              "Discrepancy_Alert": [
+                {{
+                  "Warning": "Tên thông số/hạng mục sai lệch hoặc bất thường",
+                  "Detail": "Đánh giá chi tiết nguy cơ kỹ thuật, khả năng suy giảm cách điện, nguy cơ sự cố khi đóng điện và khuyến nghị hướng xử lý thí nghiệm lại hoặc từ chối nghiệm thu"
+                }}
+              ]
+            }}
+            Lưu ý: Bóc tách đầy đủ tất cả các trang, không bỏ sót bất kỳ hạng mục đo lường nào có trong biên bản.
+            """
+
+            chat = client.chats.create(
+                model=model_name,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json"
+                )
+            )
+            res_main = chat.send_message(message=[pdf_1, pdf_2, prompt_main])
+            data_result = extract_json(res_main.text)
+            
+            status.update(label="Hoàn tất phân tích chuyên gia!", state="complete")
+
+        if data_result:
+            # Lưu học tập vào bộ nhớ
+            save_to_knowledge_base({
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "file_a": file_a.name,
+                "file_b": file_b.name,
+                "alerts_summary": data_result.get("Discrepancy_Alert", [])[:3]
+            })
+
+            # Hiển thị cảnh báo sai lệch
+            st.subheader("⚠️ Cảnh Báo Kỹ Thuật & Khuyến Nghị Vận Hành")
+            alerts = data_result.get("Discrepancy_Alert", [])
+            if alerts:
+                for alert in alerts:
+                    st.error(f"**{alert.get('Warning')}**: {alert.get('Detail')}")
+            else:
+                st.success("✅ Toàn bộ thông số đo đạc trong biên bản đều nằm trong giới hạn dung sai cho phép của tiêu chuẩn.")
+
+            # Tab chi tiết
+            tab1, tab2 = st.tabs(["📊 Bảng Đối Soát Chi Tiết", "📄 Thông Tin Thiết Bị MBA"])
+            
+            with tab1:
+                df_comp = pd.DataFrame(data_result.get("Comparison", []))
+                if not df_comp.empty:
+                    # Đổi màu hiển thị kết quả nếu muốn
+                    st.dataframe(df_comp, use_container_width=True)
+                else:
+                    st.info("Không có dữ liệu đối chiếu thông số.")
+
+            with tab2:
+                df_sum = pd.DataFrame(data_result.get("Summary", []))
+                if not df_sum.empty:
+                    st.dataframe(df_sum, use_container_width=True)
+                else:
+                    st.info("Không có dữ liệu tổng quan.")
+
+            # Xuất tệp Excel
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                for sheet_name, content in data_result.items():
+                    display_name = sheet_name.replace("_", " ")[:31]
+                    df_sheet = pd.DataFrame(content)
+                    df_sheet.to_excel(writer, sheet_name=display_name, index=False)
+                    worksheet = writer.sheets[display_name]
+                    for col in worksheet.columns:
+                        worksheet.column_dimensions[col[0].column_letter].width = 28
+
+            st.download_button(
+                label="📥 TẢI VỀ BÁO CÁO ĐỐI SOÁT EXCEL",
+                data=excel_buffer.getvalue(),
+                file_name=f"Bao_Cao_Doi_Soat_MBA_{int(time.time())}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                type="primary"
+            )
+        else:
+            st.error("Không thể giải mã dữ liệu JSON phản hồi từ AI.")
+            st.text_area("Phản hồi thô:", res_main.text, height=200)
+
+    except Exception as e:
+        st.error(f"Đã xảy ra lỗi trong quá trình xử lý: {str(e)}")
