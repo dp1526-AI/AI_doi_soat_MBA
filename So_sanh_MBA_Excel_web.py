@@ -89,7 +89,7 @@ with st.sidebar:
     
     model_name = st.selectbox(
         "Mô hình AI:", 
-        ["gemini-2.5-flash", "gemini-2.5-pro"], 
+        ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"], 
         index=0
     )
     
@@ -159,7 +159,7 @@ col1, col2 = st.columns(2)
 
 with col1:
     st.subheader("1. File Gốc (A)")
-    file_a = st.file_uploader("Chọn Tiêu chuẩn kỹ thuật (TCCS 01 / TCCS 10) hoặc Biên bản chuẩn", type=["pdf"], key="uploader_a")
+    file_a = st.file_uploader("Chọn Tiêu chuẩn kỹ thuật (TCCS 01 / TCCS 10) hoặc Biên bản MBA chuẩn", type=["pdf"], key="uploader_a")
     
     if file_a:
         if file_a.name != st.session_state.file_a_status["last_name"]:
@@ -179,7 +179,7 @@ with col1:
                     reason = res_check.get("reason") if res_check else "Không nhận diện được định dạng TCCS/MBA"
                     st.session_state.file_a_status = {
                         "valid": False, 
-                        "msg": f"❌ KHÔNG HỢP LỆ: Tệp vừa chọn không phải là TCCS 01, TCCS 10 hoặc Biên bản chuẩn MBA!\n\nLý do: {reason}\n👉 Vui lòng chọn lại đúng tệp tiêu chuẩn hoặc biên bản thử nghiệm MBA.", 
+                        "msg": f"❌ KHÔNG HỢP LỆ: Tệp vừa chọn không phải là TCCS 01, TCCS 10 hoặc Biên bản MBA chuẩn!\n\nLý do: {reason}\n👉 Vui lòng chọn lại đúng tệp tiêu chuẩn hoặc biên bản thử nghiệm MBA.", 
                         "info": None, 
                         "last_name": file_a.name
                     }
