@@ -38,20 +38,19 @@ def save_to_knowledge_base(record_info):
         st.warning(f"Không thể ghi nhận tri thức học lịch sử: {e}")
 
 # --- QUẢN LÝ TẢI FILE LÊN GEMINI ---
-def upload_file_bytes_to_gemini(client, uploaded_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", prefix="mba_doc_") as tmp:
-        tmp.write(uploaded_file.getbuffer())
-        tmp_path = tmp.name
 
-    try:
-        file_ref = client.files.upload(file=tmp_path)
-        while file_ref.state.name == "PROCESSING":
-            time.sleep(1.5)
-            file_ref = client.files.get(name=file_ref.name)
-        return file_ref
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+def sanitize_api_key(key: str) -> str:
+    if not key:
+        return ""
+    # Chuyển đổi các ký tự trông giống chữ A, B Cyrillic về ASCII hoặc lọc bỏ ký tự lạ
+    key = key.strip().replace('\u0410', 'A').replace('\u0430', 'a')
+    return key.encode('ascii', 'ignore').decode('ascii')
+
+def make_pdf_part(uploaded_file):
+    return types.Part.from_bytes(
+        data=uploaded_file.getvalue(),
+        mime_type="application/pdf"
+    )
 
 def extract_json(text):
     try:
@@ -89,7 +88,7 @@ with st.sidebar:
     
     model_name = st.selectbox(
         "Mô hình AI:", 
-        ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-3.6-flash"], 
+        ["gemini-2.5-flash", "gemini-3.6-flash"], 
         index=0
     )
     
@@ -107,7 +106,7 @@ with st.sidebar:
 def verify_file_a(uploaded_file, client):
     with st.spinner("🔍 Đang thẩm định tính pháp lý & kỹ thuật của File Gốc..."):
         try:
-            pdf_ref = upload_file_bytes_to_gemini(client, uploaded_file)
+            pdf_part = make_pdf_part(uploaded_file)
             prompt = """
             Bạn là Kỹ sư Trưởng thẩm định hồ sơ kỹ thuật lưới điện và thiết bị phân phối EVN.
             Hãy kiểm tra tài liệu PDF này có thuộc một trong các loại tài liệu chuẩn sau không:
@@ -121,19 +120,19 @@ def verify_file_a(uploaded_file, client):
                 "reason": "Giải thích chi tiết căn cứ xác định (Tên tiêu chuẩn, Số quyết định ban hành, Mã hiệu MBA, Tên đơn vị lập...)"
             }
             """
-            res = client.chats.create(
+            res = client.models.generate_content(
                 model=model_name,
+                contents=[pdf_part, prompt],
                 config=types.GenerateContentConfig(response_mime_type="application/json")
-            ).send_message(message=[pdf_ref, prompt])
-            data = extract_json(res.text)
-            return data
+            )
+            return extract_json(res.text)
         except Exception as e:
             return {"is_valid": False, "reason": f"Lỗi thẩm định: {str(e)}"}
 
 def verify_file_b(uploaded_file, client):
     with st.spinner("🔍 Đang kiểm tra tính hợp lệ của Biên bản kiểm định..."):
         try:
-            pdf_ref = upload_file_bytes_to_gemini(client, uploaded_file)
+            pdf_part = make_pdf_part(uploaded_file)
             prompt = """
             Bạn là Chuyên viên Thử nghiệm Cao cấp của Trung tâm Thí nghiệm điện (ETC).
             Hãy kiểm tra tài liệu PDF này có phải là Biên bản kiểm định / Biên bản thử nghiệm / Thí nghiệm kỹ thuật của MÁY BIẾN ÁP (máy biến thế) hay không?
@@ -145,14 +144,15 @@ def verify_file_b(uploaded_file, client):
                 "reason": "Giải thích chi tiết (Tên trạm/nhà máy, số chế tạo MBA, đơn vị thí nghiệm, các hạng mục đo lường được nhận dạng...)"
             }
             """
-            res = client.chats.create(
+            res = client.models.generate_content(
                 model=model_name,
+                contents=[pdf_part, prompt],
                 config=types.GenerateContentConfig(response_mime_type="application/json")
-            ).send_message(message=[pdf_ref, prompt])
-            data = extract_json(res.text)
-            return data
+            )
+            return extract_json(res.text)
         except Exception as e:
             return {"is_bbtn_mba": False, "reason": f"Lỗi thẩm định: {str(e)}"}
+            
 
 # --- BỐ TRÍ 2 KHUNG CHỌN TỆP ---
 col1, col2 = st.columns(2)
@@ -238,8 +238,8 @@ if not can_proceed:
 # --- NÚT BẮT ĐẦU ĐỐI SOÁT ---
 if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type="primary", disabled=not can_proceed, use_container_width=True):
     try:
-        client = genai.Client(api_key=api_key_input.strip())
-        
+        clean_key = sanitize_api_key(api_key_input)
+        client = genai.Client(api_key=clean_key)
         with st.status("🚀 Đang tiến hành đối soát và phân tích chuyên gia...", expanded=True) as status:
             st.write("⏳ Đang đồng bộ tài liệu lên AI Analysis Engine...")
             pdf_1 = upload_file_bytes_to_gemini(client, file_a)
