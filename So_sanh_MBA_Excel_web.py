@@ -8,6 +8,8 @@ import io
 import pandas as pd
 from google import genai
 from google.genai import types
+import unicodedata
+
 
 # --- CẤU HÌNH TRANG WEB ---
 st.set_page_config(
@@ -38,6 +40,14 @@ def save_to_knowledge_base(record_info):
         st.warning(f"Không thể ghi nhận tri thức học lịch sử: {e}")
 
 # --- QUẢN LÝ TẢI FILE LÊN GEMINI ---
+
+def clean_api_key(key: str) -> str:
+    if not key:
+        return ""
+    # Chuẩn hóa về dạng NFKD để tách các ký tự đồng dạng (homoglyph)
+    normalized = unicodedata.normalize('NFKD', key.strip())
+    # Loại bỏ triệt để mọi ký tự nằm ngoài bảng mã ASCII tiêu chuẩn
+    return normalized.encode('ascii', 'ignore').decode('ascii')
 
 def sanitize_api_key(key: str) -> str:
     if not key:
@@ -238,13 +248,14 @@ if not can_proceed:
 # --- NÚT BẮT ĐẦU ĐỐI SOÁT ---
 if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type="primary", disabled=not can_proceed, use_container_width=True):
     try:
-        clean_key = sanitize_api_key(api_key_input)
-        client = genai.Client(api_key=clean_key)
+        sanitized_key = clean_api_key(api_key_input)
+        client = genai.Client(api_key=sanitized_key)
+        
         with st.status("🚀 Đang tiến hành đối soát và phân tích chuyên gia...", expanded=True) as status:
             st.write("⏳ Đang đồng bộ tài liệu lên AI Analysis Engine...")
-            pdf_1 = upload_file_bytes_to_gemini(client, file_a)
-            pdf_2 = upload_file_bytes_to_gemini(client, file_b)
-            
+            pdf_1 = make_pdf_part(file_a)
+            pdf_2 = make_pdf_part(file_b)
+          
             st.write("🧠 AI Chuyên gia Thí nghiệm điện đang thẩm định toàn diện các hạng mục kỹ thuật...")
             
             hist_items = load_knowledge_base()
@@ -329,9 +340,17 @@ if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type=
                     response_mime_type="application/json"
                 )
             )
-            res_main = chat.send_message(message=[pdf_1, pdf_2, prompt_main])
-            data_result = extract_json(res_main.text)
             
+            res_main = client.models.generate_content(
+                model=model_name,
+                contents=[pdf_1, pdf_2, prompt_main],
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json"
+                )
+            )
+            data_result = extract_json(res_main.text)
+                   
             status.update(label="Hoàn tất phân tích chuyên gia!", state="complete")
 
         if data_result:
