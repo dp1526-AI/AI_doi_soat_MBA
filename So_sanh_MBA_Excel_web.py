@@ -39,19 +39,24 @@ def save_to_knowledge_base(record_info):
 
 # --- QUẢN LÝ TẢI FILE LÊN GEMINI ---
 def upload_file_bytes_to_gemini(client, uploaded_file):
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(uploaded_file.getbuffer())
-        tmp_path = tmp.name
+    # Đọc dữ liệu nhị phân từ file upload vào bộ nhớ
+    file_bytes = io.BytesIO(uploaded_file.getvalue())
+    
+    # Đặt tên hiển thị an toàn (chỉ dùng ký tự ASCII) để tránh lỗi header HTTP
+    safe_display_name = f"mba_document_{int(time.time())}.pdf"
 
-    try:
-        file_ref = client.files.upload(file=tmp_path)
-        while file_ref.state.name == "PROCESSING":
-            time.sleep(1.5)
-            file_ref = client.files.get(name=file_ref.name)
-        return file_ref
-    finally:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
+    # Tải trực tiếp bằng stream bytes và chỉ định rõ mime_type
+    file_ref = client.files.upload(
+        file=file_bytes,
+        mime_type="application/pdf",
+        config=types.UploadFileConfig(display_name=safe_display_name)
+    )
+
+    while file_ref.state.name == "PROCESSING":
+        time.sleep(1.5)
+        file_ref = client.files.get(name=file_ref.name)
+        
+    return file_ref
 
 def extract_json(text):
     try:
