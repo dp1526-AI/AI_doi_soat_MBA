@@ -21,6 +21,32 @@ st.set_page_config(
 KNOWLEDGE_FILE = "knowledge_mba_history.json"
 
 # --- HÀM TIỆN ÍCH LỊCH SỬ HỌC TẬP ---
+
+def fix_mobile_api_key(key: str) -> str:
+    if not key:
+        return ""
+    # Bảng ánh xạ các ký tự Cyrillic/Unicode thường bị bàn phím điện thoại tự đổi sang ASCII
+    homoglyphs = {
+        '\u0410': 'A', '\u0430': 'a',  # Chữ A Cyrillic (thủ phạm gây lỗi position 3)
+        '\u0412': 'B', '\u0432': 'b',
+        '\u0415': 'E', '\u0435': 'e',
+        '\u041a': 'K', '\u043a': 'k',
+        '\u041c': 'M', '\u043c': 'm',
+        '\u041d': 'H',
+        '\u041e': 'O', '\u043e': 'o',
+        '\u0420': 'P', '\u0440': 'p',
+        '\u0421': 'C', '\u0441': 'c',
+        '\u0422': 'T',
+        '\u0425': 'X', '\u0445': 'x',
+    }
+    # Thay thế từng ký tự lạ bị bàn phím mobile chèn vào
+    for bad_char, good_char in homoglyphs.items():
+        key = key.replace(bad_char, good_char)
+        
+    # Loại bỏ triệt để khoảng trắng vô tình copy và các ký tự ngoài dải ASCII
+    clean = "".join([c for c in key.strip() if ord(c) < 128])
+    return clean
+
 def load_knowledge_base():
     if os.path.exists(KNOWLEDGE_FILE):
         try:
@@ -88,13 +114,16 @@ if not env_api_key and "GEMINI_API_KEY" in st.secrets:
 
 with st.sidebar:
     st.header("⚙️ Cấu hình Hệ thống")
-    api_key_input = st.text_input(
+    raw_api_key = st.text_input(
         "Gemini API Key:", 
         value=env_api_key, 
         type="password",
         placeholder="Dán API Key vào đây (AIza... hoặc AQ...)",
-        help="Khóa API được xử lý an toàn trong phiên làm việc hiện tại."
+        help="Khóa API được xử lý an toàn."
     )
+    # Tự động chuẩn hóa ngay lập tức kể cả khi gõ từ điện thoại
+    api_key_input = fix_mobile_api_key(raw_api_key)
+
     
     model_name = st.selectbox(
         "Mô hình AI:", 
@@ -249,7 +278,8 @@ if not can_proceed:
 if st.button("📊 BẮT ĐẦU ĐỐI SOÁT CHUYÊN SÂU & XUẤT EXCEL", type="primary", disabled=not can_proceed, use_container_width=True):
     try:
         sanitized_key = clean_api_key(api_key_input)
-        client = genai.Client(api_key=sanitized_key)
+        #client = genai.Client(api_key=sanitized_key)
+        client = genai.Client(api_key=api_key_input)
         
         with st.status("🚀 Đang tiến hành đối soát và phân tích chuyên gia...", expanded=True) as status:
             st.write("⏳ Đang đồng bộ tài liệu lên AI Analysis Engine...")
